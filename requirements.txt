@@ -1,0 +1,680 @@
+"""
+RPG 게임 시스템 (PySide6)
+━━━━━━━━━━━━━━━━━━━━━━━
+- QWidget  : 직업 선택 / 전직 UI  (QWidgetJobSelector)
+- MyWidget : 스킬 사용 / 전투 UI  (MyWidget)
+- Python 상속으로 캐릭터·직업·스킬 클래스 분리
+
+직업: 전사 / 마법사 / 궁수 / 도적 / 힐러
+스킬: 슬래시 / 화염구 / 저격 / 럭키세븐 / 힐
+"""
+
+import sys
+import random
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QProgressBar, QMessageBox,
+    QGridLayout, QFrame, QTextEdit, QLineEdit
+)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+
+
+# ══════════════════════════════════════════════════════════
+#  ① 스킬 클래스 계층
+# ══════════════════════════════════════════════════════════
+class Skill:
+    """모든 스킬의 기본 클래스"""
+    def __init__(self, name: str, power: int, mp_cost: int, emoji: str, description: str):
+        self.name = name
+        self.power = power
+        self.mp_cost = mp_cost
+        self.emoji = emoji
+        self.description = description
+
+    def use(self, caster, target) -> str:
+        raise NotImplementedError
+
+    def __str__(self):
+        return f"{self.emoji} {self.name} (MP:{self.mp_cost})"
+
+
+class AttackSkill(Skill):
+    """공격형 스킬"""
+    def use(self, caster, target) -> str:
+        if caster.mp < self.mp_cost:
+            return f"❌ MP 부족! ({self.name} 사용 불가)"
+        caster.mp -= self.mp_cost
+        dmg = self.power + random.randint(-5, 5)
+        target.hp = max(0, target.hp - dmg)
+        return f"{self.emoji} {caster.name}의 [{self.name}]! → {target.name}에게 {dmg} 데미지!"
+
+
+class HealSkill(Skill):
+    """회복형 스킬"""
+    def use(self, caster, target) -> str:
+        if caster.mp < self.mp_cost:
+            return f"❌ MP 부족! ({self.name} 사용 불가)"
+        caster.mp -= self.mp_cost
+        heal = self.power + random.randint(0, 10)
+        caster.hp = min(caster.max_hp, caster.hp + heal)
+        return f"{self.emoji} {caster.name}의 [{self.name}]! → 자신의 HP +{heal} 회복!"
+
+
+# ── 직업별 전용 스킬 ──
+class Slash(AttackSkill):
+    def __init__(self):
+        super().__init__("슬래시", 60, 20, "⚔️", "강력한 일격으로 적을 베어냅니다.")
+
+
+class Fireball(AttackSkill):
+    def __init__(self):
+        super().__init__("화염구", 55, 25, "🔥", "원거리 화염 마법으로 적을 불태웁니다.")
+
+
+class Snipe(AttackSkill):
+    def __init__(self):
+        super().__init__("저격", 70, 30, "🏹", "급소를 노리는 단일 결전기. 높은 화력.")
+
+
+class LuckySeven(AttackSkill):
+    def __init__(self):
+        super().__init__("럭키 세븐", 45, 15, "🌟", "표창 7개를 연속으로 투척합니다.")
+
+    def use(self, caster, target) -> str:
+        if caster.mp < self.mp_cost:
+            return f"❌ MP 부족! ({self.name} 사용 불가)"
+        caster.mp -= self.mp_cost
+        total = sum(random.randint(5, 15) for _ in range(7))
+        target.hp = max(0, target.hp - total)
+        return f"🌟 {caster.name}의 [럭키 세븐]! 표창 7연타 → {target.name}에게 총 {total} 데미지!"
+
+
+class Heal(HealSkill):
+    def __init__(self):
+        super().__init__("힐", 50, 20, "💚", "빛의 마법으로 자신의 체력을 회복합니다.")
+
+
+# ══════════════════════════════════════════════════════════
+#  ② 캐릭터 클래스 계층
+# ══════════════════════════════════════════════════════════
+class Character:
+    """기본 캐릭터 — 초보자"""
+    JOB_NAME  = "초보자"
+    JOB_EMOJI = "🧑"
+    COLOR     = "#aaaaaa"
+
+    def __init__(self, name: str):
+        self.name    = name
+        self.level   = 1
+        self.exp     = 0
+        self.max_hp  = 100
+        self.hp      = 100
+        self.max_mp  = 50
+        self.mp      = 50
+        self.atk     = 10
+        self.skills: list[Skill] = []
+
+    def gain_exp(self, amount: int) -> str:
+        self.exp += amount
+        msgs = [f"✨ 경험치 +{amount}  (현재 EXP: {self.exp})"]
+        while self.exp >= self.level * 20:
+            self.exp -= self.level * 20
+            self.level += 1
+            self.max_hp += 10
+            self.hp = self.max_hp
+            self.max_mp += 5
+            self.mp = self.max_mp
+            self.atk += 2
+            msgs.append(f"🎉 레벨업! → Lv.{self.level}")
+            if self.level == 10:
+                msgs.append("⚡ Lv.10 달성! 이제 전직이 가능합니다!")
+        return "\n".join(msgs)
+
+    def normal_attack(self, target) -> str:
+        dmg = self.atk + random.randint(-3, 3)
+        target.hp = max(0, target.hp - dmg)
+        return f"👊 {self.name}의 [일반 공격]! → {target.name}에게 {dmg} 데미지!"
+
+    def can_change_job(self) -> bool:
+        return self.level >= 10
+
+
+class Warrior(Character):
+    JOB_NAME  = "전사"
+    JOB_EMOJI = "⚔️"
+    COLOR     = "#e74c3c"
+    def __init__(self, name):
+        super().__init__(name)
+        self.max_hp += 50; self.hp = self.max_hp
+        self.atk    += 10
+        self.skills  = [Slash()]
+
+
+class Mage(Character):
+    JOB_NAME  = "마법사"
+    JOB_EMOJI = "🔮"
+    COLOR     = "#8e44ad"
+    def __init__(self, name):
+        super().__init__(name)
+        self.max_mp += 80; self.mp = self.max_mp
+        self.atk    += 5
+        self.skills  = [Fireball()]
+
+
+class Archer(Character):
+    JOB_NAME  = "궁수"
+    JOB_EMOJI = "🏹"
+    COLOR     = "#27ae60"
+    def __init__(self, name):
+        super().__init__(name)
+        self.max_hp += 20; self.hp = self.max_hp
+        self.atk    += 8
+        self.skills  = [Snipe()]
+
+
+class Rogue(Character):
+    JOB_NAME  = "도적"
+    JOB_EMOJI = "🗡️"
+    COLOR     = "#f39c12"
+    def __init__(self, name):
+        super().__init__(name)
+        self.atk   += 12
+        self.skills = [LuckySeven()]
+
+
+class Healer(Character):
+    JOB_NAME  = "힐러"
+    JOB_EMOJI = "💚"
+    COLOR     = "#16a085"
+    def __init__(self, name):
+        super().__init__(name)
+        self.max_hp += 30; self.hp = self.max_hp
+        self.max_mp += 50; self.mp = self.max_mp
+        self.skills  = [Heal()]
+
+
+# ══════════════════════════════════════════════════════════
+#  ③ 적 클래스
+# ══════════════════════════════════════════════════════════
+class Enemy:
+    def __init__(self, name, hp, atk, exp_reward):
+        self.name       = name
+        self.max_hp     = hp
+        self.hp         = hp
+        self.atk        = atk
+        self.exp_reward = exp_reward
+
+    def attack(self, target) -> str:
+        dmg = self.atk + random.randint(-2, 2)
+        target.hp = max(0, target.hp - dmg)
+        return f"💥 {self.name}의 공격! → {target.name}에게 {dmg} 데미지!"
+
+    def is_alive(self): return self.hp > 0
+
+
+ENEMY_POOL = [
+    ("슬라임",   30,  5,  15),
+    ("고블린",   50,  8,  25),
+    ("오크",     80,  14, 40),
+    ("트롤",    120,  20, 60),
+    ("드래곤",  200,  30, 100),
+]
+
+
+# ══════════════════════════════════════════════════════════
+#  ④ MyWidget — 스킬 사용 / 전투 UI
+# ══════════════════════════════════════════════════════════
+class MyWidget(QWidget):
+    """스킬 및 전투를 담당하는 위젯"""
+
+    STYLE = """
+        QWidget   { background:#1a1a2e; color:#eaeaea; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; }
+        QLabel    { color:#eaeaea; }
+        QTextEdit { background:#16213e; color:#00ffcc; border:1px solid #0f3460; border-radius:6px; font-size:12px; padding:6px; }
+        QPushButton {
+            background:#0f3460; color:#eaeaea; border:none;
+            border-radius:8px; padding:10px 16px; font-size:13px; font-weight:bold;
+        }
+        QPushButton:hover    { background:#533483; }
+        QPushButton:pressed  { background:#e94560; }
+        QPushButton:disabled { background:#2a2a3a; color:#555; }
+        QProgressBar { border:1px solid #444; border-radius:5px; text-align:center; height:18px; }
+        QProgressBar::chunk { border-radius:5px; }
+        QFrame { border:none; }
+    """
+
+    def __init__(self, player: Character, parent=None):
+        super().__init__(parent)
+        self.player = player
+        self.enemy: Enemy | None = None
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setWindowTitle("⚔️ 전투 시스템 (MyWidget)")
+        self.setMinimumSize(700, 600)
+        self.setStyleSheet(self.STYLE)
+
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(16, 16, 16, 16)
+
+        # 타이틀
+        title = QLabel(f"{self.player.JOB_EMOJI}  [{self.player.JOB_NAME}] {self.player.name}의 전투")
+        title.setFont(QFont("Malgun Gothic", 15, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(f"color:{self.player.COLOR}; padding:4px;")
+        root.addWidget(title)
+
+        # ── 상태바 ──
+        stat_frame = QFrame()
+        stat_frame.setStyleSheet("background:#16213e; border-radius:10px; padding:8px;")
+        g = QGridLayout(stat_frame)
+        g.setSpacing(6)
+
+        # 플레이어
+        g.addWidget(self._bold("🧑 플레이어"), 0, 0, 1, 2)
+        self.p_hp_bar = self._bar("#e74c3c"); self.p_hp_lbl = QLabel()
+        self.p_mp_bar = self._bar("#3498db"); self.p_mp_lbl = QLabel()
+        g.addWidget(QLabel("HP"), 1, 0); g.addWidget(self.p_hp_bar, 1, 1); g.addWidget(self.p_hp_lbl, 1, 2)
+        g.addWidget(QLabel("MP"), 2, 0); g.addWidget(self.p_mp_bar, 2, 1); g.addWidget(self.p_mp_lbl, 2, 2)
+
+        # 레벨 / EXP
+        self.lv_lbl  = QLabel()
+        self.lv_lbl.setStyleSheet("color:#f1c40f; font-weight:bold;")
+        self.exp_bar = self._bar("#f39c12"); self.exp_lbl = QLabel()
+        g.addWidget(self.lv_lbl, 0, 3)
+        g.addWidget(QLabel("EXP"), 1, 3); g.addWidget(self.exp_bar, 1, 4); g.addWidget(self.exp_lbl, 1, 5)
+
+        # 적
+        self.enemy_name_lbl = QLabel("적: 없음")
+        self.enemy_name_lbl.setStyleSheet("color:#e74c3c; font-weight:bold;")
+        self.e_hp_bar = self._bar("#c0392b"); self.e_hp_lbl = QLabel()
+        g.addWidget(self.enemy_name_lbl, 0, 6)
+        g.addWidget(QLabel("HP"), 1, 6); g.addWidget(self.e_hp_bar, 1, 7); g.addWidget(self.e_hp_lbl, 1, 8)
+        root.addWidget(stat_frame)
+
+        # ── 전투 로그 ──
+        self.log = QTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setMinimumHeight(200)
+        root.addWidget(self.log)
+
+        # ── 버튼 영역 ──
+        self.btn_encounter = QPushButton("🗺️  새 적 조우")
+        self.btn_encounter.clicked.connect(self.start_encounter)
+        root.addWidget(self.btn_encounter)
+
+        self.btn_atk = QPushButton("👊  일반 공격")
+        self.btn_atk.clicked.connect(self.do_normal_attack)
+        self.btn_atk.setEnabled(False)
+        root.addWidget(self.btn_atk)
+
+        # 스킬 버튼
+        skill_row = QHBoxLayout()
+        self.skill_btns: list[QPushButton] = []
+        if self.player.skills:
+            for sk in self.player.skills:
+                b = QPushButton(f"{sk.emoji}  {sk.name}\nMP 소모: {sk.mp_cost}\n{sk.description}")
+                b.setMinimumHeight(70)
+                b.setStyleSheet(f"""
+                    QPushButton {{ background:#1b4f72; border-radius:8px; font-size:11px; color:#eee; }}
+                    QPushButton:hover {{ background:#2e86c1; }}
+                    QPushButton:disabled {{ background:#2a2a3a; color:#555; }}
+                """)
+                b.clicked.connect(lambda checked, s=sk: self.do_skill(s))
+                b.setEnabled(False)
+                skill_row.addWidget(b)
+                self.skill_btns.append(b)
+        else:
+            lbl = QLabel("※ 전직 후 스킬을 사용할 수 있습니다.")
+            lbl.setStyleSheet("color:#777; font-style:italic;")
+            skill_row.addWidget(lbl)
+        root.addLayout(skill_row)
+
+        self._refresh()
+        self._log("⚔️  전투 시스템에 오신 것을 환영합니다!")
+        self._log("🗺️  [새 적 조우] 버튼으로 전투를 시작하세요.")
+
+    # ── 헬퍼 ──
+    def _bar(self, color: str) -> QProgressBar:
+        b = QProgressBar()
+        b.setMinimumWidth(120)
+        b.setStyleSheet(f"QProgressBar::chunk {{ background:{color}; }}")
+        return b
+
+    def _bold(self, text: str) -> QLabel:
+        l = QLabel(text)
+        l.setStyleSheet("font-weight:bold;")
+        return l
+
+    def _log(self, msg: str):
+        self.log.append(msg)
+        self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+
+    def _refresh(self):
+        p = self.player
+        self.p_hp_bar.setMaximum(p.max_hp); self.p_hp_bar.setValue(p.hp)
+        self.p_hp_lbl.setText(f"{p.hp}/{p.max_hp}")
+        self.p_mp_bar.setMaximum(p.max_mp); self.p_mp_bar.setValue(p.mp)
+        self.p_mp_lbl.setText(f"{p.mp}/{p.max_mp}")
+        need = p.level * 20
+        self.exp_bar.setMaximum(need); self.exp_bar.setValue(min(p.exp, need))
+        self.exp_lbl.setText(f"{p.exp}/{need}")
+        self.lv_lbl.setText(f"Lv.{p.level}")
+        if self.enemy:
+            self.enemy_name_lbl.setText(f"적: {self.enemy.name}")
+            self.e_hp_bar.setMaximum(self.enemy.max_hp); self.e_hp_bar.setValue(self.enemy.hp)
+            self.e_hp_lbl.setText(f"{self.enemy.hp}/{self.enemy.max_hp}")
+        else:
+            self.enemy_name_lbl.setText("적: 없음")
+            self.e_hp_bar.setMaximum(1); self.e_hp_bar.setValue(0)
+            self.e_hp_lbl.setText("-")
+
+    def _set_btns(self, in_battle: bool):
+        self.btn_atk.setEnabled(in_battle)
+        for b in self.skill_btns: b.setEnabled(in_battle)
+        self.btn_encounter.setEnabled(not in_battle)
+
+    # ── 전투 로직 ──
+    def start_encounter(self):
+        self.enemy = Enemy(*random.choice(ENEMY_POOL))
+        self._log(f"\n{'─'*45}")
+        self._log(f"👾 {self.enemy.name} 등장!  HP:{self.enemy.hp}  ATK:{self.enemy.atk}")
+        self._set_btns(True)
+        self._refresh()
+
+    def _enemy_turn(self):
+        if not self.enemy or not self.enemy.is_alive(): return
+        self._log(self.enemy.attack(self.player))
+        self._refresh()
+        if self.player.hp <= 0:
+            self._log("💀 쓰러졌습니다... (자동 부활)")
+            self.player.hp = self.player.max_hp
+            self._set_btns(False)
+            self._refresh()
+
+    def _after_kill(self):
+        self._log(f"✅ {self.enemy.name} 처치!")
+        self._log(self.player.gain_exp(self.enemy.exp_reward))
+        self.enemy = None
+        self._set_btns(False)
+        self._refresh()
+
+    def do_normal_attack(self):
+        if not self.enemy: return
+        self._log(self.player.normal_attack(self.enemy))
+        self._refresh()
+        if not self.enemy.is_alive(): self._after_kill()
+        else: self._enemy_turn()
+
+    def do_skill(self, skill: Skill):
+        if not self.enemy: return
+        self._log(skill.use(self.player, self.enemy))
+        self._refresh()
+        if not self.enemy.is_alive(): self._after_kill()
+        else: self._enemy_turn()
+
+
+# ══════════════════════════════════════════════════════════
+#  ⑤ QWidget — 직업 선택 / 전직 UI
+# ══════════════════════════════════════════════════════════
+JOB_MAP = {
+    "전사":  (Warrior, "⚔️",  "#e74c3c", "높은 HP·물리 공격\n스킬: 슬래시"),
+    "마법사": (Mage,   "🔮",  "#8e44ad", "높은 MP·원거리 마법\n스킬: 화염구"),
+    "궁수":  (Archer,  "🏹",  "#27ae60", "균형 스탯·고화력\n스킬: 저격"),
+    "도적":  (Rogue,   "🗡️", "#f39c12", "최고 공격력·연타\n스킬: 럭키 세븐"),
+    "힐러":  (Healer,  "💚",  "#16a085", "높은 생존·자가 회복\n스킬: 힐"),
+}
+
+
+class QWidgetJobSelector(QWidget):
+    """직업 선택 및 전직 UI — QWidget 기반"""
+
+    STYLE = """
+        QWidget { background:#0d0d1a; color:#dde6ed; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; }
+        QLabel  { color:#dde6ed; }
+        QPushButton {
+            background:#1a237e; color:white; border:2px solid #3949ab;
+            border-radius:10px; padding:12px; font-size:13px; font-weight:bold;
+        }
+        QPushButton:hover    { background:#283593; border-color:#5c6bc0; }
+        QPushButton:pressed  { background:#e53935; }
+        QPushButton:disabled { background:#1a1a1a; color:#444; border-color:#333; }
+        QProgressBar { border:1px solid #444; border-radius:5px; text-align:center; height:16px; }
+        QProgressBar::chunk { background:#f39c12; border-radius:5px; }
+        QFrame { border:none; }
+    """
+
+    def __init__(self, player: Character):
+        super().__init__()
+        self.player = player
+        self.battle_win: MyWidget | None = None
+        self._init_ui()
+
+    def _init_ui(self):
+        self.setWindowTitle("🎮 RPG 전직 시스템 (QWidget)")
+        self.setMinimumSize(660, 560)
+        self.setStyleSheet(self.STYLE)
+
+        root = QVBoxLayout(self)
+        root.setSpacing(12)
+        root.setContentsMargins(20, 20, 20, 20)
+
+        # 타이틀
+        title = QLabel("⚔️  RPG 전직 시스템")
+        title.setFont(QFont("Malgun Gothic", 20, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color:#ffd700; letter-spacing:2px;")
+        root.addWidget(title)
+
+        # 캐릭터 정보
+        info = QFrame()
+        info.setStyleSheet("background:#11112a; border-radius:10px; padding:10px;")
+        il = QVBoxLayout(info)
+        self.char_lbl = QLabel()
+        self.char_lbl.setFont(QFont("Malgun Gothic", 12))
+        self.char_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        il.addWidget(self.char_lbl)
+        exp_row = QHBoxLayout()
+        exp_row.addWidget(QLabel("EXP"))
+        self.exp_bar = QProgressBar(); self.exp_bar.setMinimumWidth(200)
+        exp_row.addWidget(self.exp_bar)
+        self.exp_lbl = QLabel()
+        exp_row.addWidget(self.exp_lbl)
+        il.addLayout(exp_row)
+        root.addWidget(info)
+
+        # 안내 레이블
+        self.notice_lbl = QLabel()
+        self.notice_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.notice_lbl.setFont(QFont("Malgun Gothic", 11))
+        root.addWidget(self.notice_lbl)
+
+        # 직업 버튼 그리드
+        job_frame = QFrame()
+        job_frame.setStyleSheet("background:#11112a; border-radius:10px; padding:8px;")
+        grid = QGridLayout(job_frame)
+        grid.setSpacing(10)
+
+        self.job_btns: dict[str, QPushButton] = {}
+        positions = [(0,0),(0,1),(0,2),(1,0),(1,1)]
+        for (job, (cls, emoji, color, desc)), pos in zip(JOB_MAP.items(), positions):
+            btn = QPushButton(f"{emoji}\n{job}\n\n{desc}")
+            btn.setMinimumSize(160, 120)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background:#0a0a1f; border:2px solid {color}44;
+                    border-radius:10px; color:#bbb; font-size:11px;
+                }}
+                QPushButton:hover    {{ background:{color}33; border-color:{color}; color:white; }}
+                QPushButton:disabled {{ border-color:#333; color:#444; background:#0d0d0d; }}
+            """)
+            btn.clicked.connect(lambda checked, j=job: self.change_job(j))
+            btn.setEnabled(False)
+            grid.addWidget(btn, *pos)
+            self.job_btns[job] = btn
+        root.addWidget(job_frame)
+
+        # 하단 버튼
+        bottom = QHBoxLayout()
+        self.btn_grind = QPushButton("⚡  훈련 (EXP +25)")
+        self.btn_grind.clicked.connect(self.do_grind)
+        bottom.addWidget(self.btn_grind)
+
+        self.btn_battle = QPushButton("⚔️  전투 화면 열기")
+        self.btn_battle.clicked.connect(self.open_battle)
+        self.btn_battle.setEnabled(False)
+        self.btn_battle.setStyleSheet("""
+            QPushButton          { background:#145a32; border-color:#27ae60; }
+            QPushButton:hover    { background:#1e8449; }
+            QPushButton:disabled { background:#1a1a1a; border-color:#333; color:#555; }
+        """)
+        bottom.addWidget(self.btn_battle)
+        root.addLayout(bottom)
+
+        self._refresh()
+
+    def _refresh(self):
+        p = self.player
+        self.char_lbl.setText(
+            f"{p.JOB_EMOJI}  [{p.JOB_NAME}]  {p.name}   "
+            f"Lv.{p.level}   HP:{p.hp}/{p.max_hp}   MP:{p.mp}/{p.max_mp}"
+        )
+        need = p.level * 20
+        self.exp_bar.setMaximum(need)
+        self.exp_bar.setValue(min(p.exp, need))
+        self.exp_lbl.setText(f"{p.exp}/{need}")
+
+        is_beginner = p.JOB_NAME == "초보자"
+        can_change  = p.can_change_job()
+
+        if is_beginner and can_change:
+            self.notice_lbl.setText("✨ Lv.10 달성! 직업을 선택하여 전직하세요!")
+            self.notice_lbl.setStyleSheet("color:#ffd700; font-weight:bold;")
+            for b in self.job_btns.values(): b.setEnabled(True)
+        elif not is_beginner:
+            self.notice_lbl.setText(f"현재 직업: {p.JOB_EMOJI} {p.JOB_NAME}  (전직 완료)")
+            self.notice_lbl.setStyleSheet("color:#00ffcc; font-weight:bold;")
+            for b in self.job_btns.values(): b.setEnabled(False)
+            self.btn_grind.setEnabled(False)
+            self.btn_battle.setEnabled(True)
+        else:
+            rem = 10 - p.level
+            self.notice_lbl.setText(f"⚠️  전직까지 {rem}레벨 더 필요합니다. (현재 Lv.{p.level})")
+            self.notice_lbl.setStyleSheet("color:#e67e22;")
+
+    def do_grind(self):
+        result = self.player.gain_exp(25)
+        self._refresh()
+        box = QMessageBox(self)
+        box.setWindowTitle("훈련 결과")
+        box.setText(result)
+        box.setStyleSheet("QLabel{color:#dde6ed;} QWidget{background:#1a1a2e;}")
+        box.exec()
+
+    def change_job(self, job_name: str):
+        cls, emoji, color, _ = JOB_MAP[job_name]
+        ans = QMessageBox.question(
+            self, "전직 확인",
+            f"{emoji} [{job_name}](으)로 전직하시겠습니까?\n전직 후에는 변경이 불가합니다.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if ans != QMessageBox.StandardButton.Yes: return
+
+        # 기존 레벨·EXP 유지한 채 직업 클래스로 교체
+        new_char = cls(self.player.name)
+        bonus = self.player.level - 1
+        new_char.level   = self.player.level
+        new_char.exp     = self.player.exp
+        new_char.max_hp += bonus * 10; new_char.hp = new_char.max_hp
+        new_char.atk    += bonus * 2
+        self.player = new_char
+        self._refresh()
+
+        QMessageBox.information(
+            self, "전직 완료!",
+            f"🎉 {emoji} [{job_name}](으)로 전직 완료!\n\n"
+            f"스킬 [{new_char.skills[0].name}] 습득!\n\n"
+            f"⚔️ [전투 화면 열기]에서 스킬을 사용해보세요!"
+        )
+
+    def open_battle(self):
+        if self.battle_win: self.battle_win.close()
+        self.battle_win = MyWidget(self.player)
+        self.battle_win.show()
+
+
+# ══════════════════════════════════════════════════════════
+#  ⑥ 시작 화면 — 이름 입력
+# ══════════════════════════════════════════════════════════
+class StartScreen(QWidget):
+    STYLE = """
+        QWidget { background:#0d0d1a; color:#dde6ed; font-family:'Malgun Gothic','Apple SD Gothic Neo',sans-serif; }
+        QLabel  { color:#dde6ed; }
+        QPushButton {
+            background:#1a237e; color:white; border:2px solid #3949ab;
+            border-radius:10px; padding:12px; font-size:14px; font-weight:bold;
+        }
+        QPushButton:hover { background:#283593; }
+        QLineEdit {
+            background:#11112a; border:2px solid #3949ab; border-radius:8px;
+            padding:10px; font-size:14px; color:white;
+        }
+        QLineEdit:focus { border-color:#ffd700; }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("⚔️ RPG 게임 시작")
+        self.setMinimumSize(400, 300)
+        self.setStyleSheet(self.STYLE)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(16)
+
+        title = QLabel("⚔️  RPG 게임")
+        title.setFont(QFont("Malgun Gothic", 24, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color:#ffd700;")
+        layout.addWidget(title)
+
+        sub = QLabel("캐릭터 이름을 입력하세요")
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet("color:#aaa; font-size:13px;")
+        layout.addWidget(sub)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("이름 입력...")
+        self.name_input.returnPressed.connect(self.start_game)
+        layout.addWidget(self.name_input)
+
+        btn = QPushButton("🎮  게임 시작!")
+        btn.clicked.connect(self.start_game)
+        layout.addWidget(btn)
+
+        info = QLabel("Lv.10 달성 시 전직 가능\n전사 / 마법사 / 궁수 / 도적 / 힐러")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info.setStyleSheet("color:#555; font-size:11px;")
+        layout.addWidget(info)
+
+        self.main_win = None
+
+    def start_game(self):
+        name = self.name_input.text().strip() or "용사"
+        player = Character(name)
+        self.main_win = QWidgetJobSelector(player)
+        self.main_win.show()
+        self.close()
+
+
+# ══════════════════════════════════════════════════════════
+#  ⑦ 진입점
+# ══════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    screen = StartScreen()
+    screen.show()
+    sys.exit(app.exec())
